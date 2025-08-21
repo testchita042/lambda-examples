@@ -8,7 +8,7 @@ import (
 
 // Returns a list of available addresses in the format of []<ip4>:port
 func GetOpenPorts() ([]string, error) {
-	var openPorts []string
+	openPorts := make([]string, 0)
 	// Common ports to check
 	ports := []int{22, 80, 443, 8080, 3306, 5432}
 	ifaces, err := net.Interfaces()
