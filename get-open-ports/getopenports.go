@@ -3,14 +3,18 @@ package getopenports
 import (
 	"fmt"
 	"net"
+	"sync"
 	"time"
 )
 
 // Returns a list of available addresses in the format of []<ip4>:port
 func GetOpenPorts() ([]string, error) {
-	openPorts := make([]string, 0)
-	// Common ports to check
-	ports := []int{22, 80, 443, 8080, 3306, 5432}
+	var openPorts []string
+	var mutex sync.Mutex
+	// Check all ports from 1 to 65535
+	const maxPort = 65535
+	const numWorkers = 1000 // Number of concurrent port scanners
+
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
@@ -32,14 +36,28 @@ func GetOpenPorts() ([]string, error) {
 				continue // skip non-IPv4
 			}
 			ipStr := ip.String()
-			for _, port := range ports {
-				address := fmt.Sprintf("%s:%d", ipStr, port)
-				conn, err := net.DialTimeout("tcp", address, time.Millisecond*200)
-				if err == nil {
-					openPorts = append(openPorts, address)
-					conn.Close()
-				}
+			var wg sync.WaitGroup
+			sem := make(chan bool, numWorkers)
+
+			// Scan ports from 1 to maxPort
+			for port := 1; port <= maxPort; port++ {
+				wg.Add(1)
+				sem <- true // Acquire semaphore
+				go func(p int) {
+					defer wg.Done()
+					defer func() { <-sem }() // Release semaphore
+
+					address := fmt.Sprintf("%s:%d", ipStr, p)
+					conn, err := net.DialTimeout("tcp", address, time.Millisecond*200)
+					if err == nil {
+						mutex.Lock()
+						openPorts = append(openPorts, address)
+						mutex.Unlock()
+						conn.Close()
+					}
+				}(port)
 			}
+			wg.Wait() // Wait for all port scans to complete
 		}
 	}
 	return openPorts, nil
